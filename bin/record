@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# pane.focused hook: move the focused pane to the front of its tab's most-recently-used (MRU) list.
+# One pane id per line, newest first, one file per tab. Runs on every focus change, so keep it short.
+set -u
+
+state_dir=${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-pane-mru}
+max_entries=32
+
+# Do not depend on the exact event JSON shape: look for the pane id in several places, then fall back to the context.
+pane=""
+if [ -n "${HERDR_PLUGIN_EVENT_JSON:-}" ] && command -v jq >/dev/null 2>&1; then
+    pane=$(printf '%s' "$HERDR_PLUGIN_EVENT_JSON" |
+        jq -r '[.data.pane_id?, .pane_id?, .data.pane.pane_id?, .pane.pane_id?] | map(select(type == "string")) | first // empty' 2>/dev/null)
+fi
+pane=${pane:-${HERDR_PANE_ID:-}}
+[ -n "$pane" ] || exit 0
+
+# Pane ids look like "w3:pG". Without a tab id, group by the workspace prefix (tabs of one workspace then share a list, which is coarse but never wrong).
+tab=${HERDR_TAB_ID:-${pane%%:*}}
+mkdir -p "$state_dir" || exit 0
+file="$state_dir/$(printf '%s' "$tab" | tr -c 'A-Za-z0-9._-' '_').mru"
+
+(
+    flock -w 1 9 || exit 0
+    { printf '%s\n' "$pane"; [ -f "$file" ] && grep -vxF -- "$pane" "$file"; } | head -n "$max_entries" >"$file.tmp" &&
+        mv -f "$file.tmp" "$file"
+) 9>"$file.lock"
+exit 0

@@ -1,0 +1,44 @@
+# herdr-pane-mru: make directional focus (prefix+h/j/k/l) prefer the most recently used pane, like tmux.
+#
+# herdr 0.9.0 find_in_direction (src/layout.rs) picks purely by geometry:
+#   (edge distance, larger overlap, center distance, layout order)
+# In a layout such as {[1, 2], [1]}, moving left from the right-hand pane ties on the first three keys,
+# so it always lands on the pane that comes first in layout order.
+# This plugin breaks ties among the adjacent candidates (same edge distance) by recent focus order first,
+# and falls back to herdr's own ordering when there is no history.
+
+id = "unstable-code.herdr-pane-mru"
+name = "herdr-pane-mru"
+version = "0.1.0"
+description = "Directional pane focus that prefers the most recently used neighbour, like tmux."
+min_herdr_version = "0.9.0"
+platforms = ["linux", "macos"]
+
+# Record focus history. Fires on every focus change regardless of how it happened (keys, mouse, notification jump).
+[[events]]
+on = "pane.focused"
+command = ["bin/record"]
+
+[[actions]]
+id = "focus-left"
+title = "Focus pane left (MRU)"
+contexts = ["pane"]
+command = ["bin/focus", "left"]
+
+[[actions]]
+id = "focus-right"
+title = "Focus pane right (MRU)"
+contexts = ["pane"]
+command = ["bin/focus", "right"]
+
+[[actions]]
+id = "focus-up"
+title = "Focus pane up (MRU)"
+contexts = ["pane"]
+command = ["bin/focus", "up"]
+
+[[actions]]
+id = "focus-down"
+title = "Focus pane down (MRU)"
+contexts = ["pane"]
+command = ["bin/focus", "down"]

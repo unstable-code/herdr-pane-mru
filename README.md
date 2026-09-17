@@ -1,93 +1,139 @@
 # herdr-pane-mru
 
+**English** | [한국어](README.ko.md)
 
+A [herdr](https://herdr.dev) plugin that makes directional pane focus (`prefix+h/j/k/l`) return to the
+**most recently used pane**, like tmux.
 
-## Getting started
+## Why
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+herdr 0.9.0 picks the target of a directional move purely by geometry (`find_in_direction` in `src/layout.rs`):
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.gggames.synology.me/unstable-code/herdr-pane-mru.git
-git branch -M master
-git push -uf origin master
+sort key = (edge distance, larger overlap, center distance, layout order)
 ```
 
-## Integrate with your tools
+In a layout where one column is split in two, going from `B` to `C` and back ties on the first three keys,
+so herdr **always lands on `A`**, the pane that comes first in layout order. It does not remember that you were in `B`.
 
-* [Set up project integrations](https://gitlab.gggames.synology.me/unstable-code/herdr-pane-mru/-/settings/integrations)
+```
+┌─────┬─────┐
+│  A  │     │
+├─────┤  C  │     B → C → (left) ⇒ herdr: A    this plugin: B
+│  B  │     │
+└─────┴─────┘
+```
 
-## Collaborate with your team
+tmux picks the most recently used pane in this case. This plugin reproduces that.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## How it works
 
-## Test and Deploy
+- A `pane.focused` event hook (`bin/record`) keeps a per-tab most-recently-used (MRU) list in
+  `$HERDR_PLUGIN_STATE_DIR/<tab>.mru`. It sees every focus change, whatever caused it (keys, mouse, notification jump).
+- The directional actions (`bin/focus <dir>`) use **the same candidate rule as herdr** (panes on that side whose
+  perpendicular axis overlaps) and insert the MRU rank into the sort key:
 
-Use the built-in continuous integration in GitLab.
+  ```
+  herdr          = (edge distance,           overlap desc, center distance, order)
+  herdr-pane-mru = (edge distance, MRU rank, overlap desc, center distance, order)
+  ```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+  Edge distance stays first, so history is only followed among **directly adjacent** panes. Candidates with no
+  history are ordered exactly as herdr would order them.
+- herdr's CLI `pane focus` only accepts a direction, so focusing a specific pane id goes through the socket API
+  (`pane.focus`).
+- When the pane is zoomed, or anything fails, it **hands off to herdr's built-in directional focus** so the plugin
+  can never block navigation.
 
-***
+## Requirements
 
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+- herdr ≥ 0.9.0 (Linux / macOS)
+- `bash`, `jq`, `socat`, `flock` (util-linux), found on the herdr server's `PATH`. Without `jq` or `socat` it
+  falls back to the built-in move.
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+```sh
+herdr plugin install unstable-code/herdr-pane-mru
+```
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Run the same command again to update. The canonical repository is a self-hosted GitLab instance, mirrored to
+[GitHub](https://github.com/unstable-code/herdr-pane-mru) because `herdr plugin install` only fetches from GitHub.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+For development, link a local clone instead; the working tree is used directly, so `git pull` is the update:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+```sh
+git clone https://github.com/unstable-code/herdr-pane-mru.git
+herdr plugin link ./herdr-pane-mru
+```
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+To switch a linked copy to an installed one, `herdr plugin unlink unstable-code.herdr-pane-mru` first: herdr refuses
+to replace a plugin that is linked from a local path (herdr 0.9.0 `ensure_replacement_allowed` in `src/cli/plugin.rs`).
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+In `~/.config/herdr/config.toml`, **clear** the built-in directional keys and bind the same keys to the plugin actions:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```toml
+[keys]
+focus_pane_left = ""
+focus_pane_down = ""
+focus_pane_up = ""
+focus_pane_right = ""
+
+[[keys.command]]
+key = "prefix+h"
+type = "plugin_action"
+command = "unstable-code.herdr-pane-mru.focus-left"
+description = "focus pane left (MRU)"
+
+[[keys.command]]
+key = "prefix+j"
+type = "plugin_action"
+command = "unstable-code.herdr-pane-mru.focus-down"
+description = "focus pane down (MRU)"
+
+[[keys.command]]
+key = "prefix+k"
+type = "plugin_action"
+command = "unstable-code.herdr-pane-mru.focus-up"
+description = "focus pane up (MRU)"
+
+[[keys.command]]
+key = "prefix+l"
+type = "plugin_action"
+command = "unstable-code.herdr-pane-mru.focus-right"
+description = "focus pane right (MRU)"
+```
+
+⚠️ Clearing the built-in keys matters. If `focus_pane_*` is set in your config and you bind the same key in
+`[[keys.command]]`, herdr treats it as a **conflict between two user bindings and disables the plugin binding**
+(herdr 0.9.0 `src/config/keybinds.rs` registers built-in actions first). If `focus_pane_*` is not in your config at
+all, the defaults are silently displaced and clearing them is not needed.
+
+`description` is what herdr's help overlay (`prefix+?`) shows in the custom group. Without it all four keys show up
+as `custom command` (herdr 0.9.0 `src/input/keybind_help.rs`). Matching the built-in wording (`focus pane left`)
+keeps it obvious what the keys used to be.
+
+Apply with `herdr server reload-config` (or your reload key).
+
+## Verification
+
+Checked on an isolated herdr 0.9.0 server (separate `HOME`) with the layout pictured above.
+
+| Scenario | Built-in | Plugin |
+|---|---|---|
+| B → C → left | A | **B** |
+| A → C → left | A | A |
+| No pane in that direction | no move | no move |
+
+All commands exited 0 in the plugin log; a move took about 34 ms and a record about 23 ms.
+
+## Limitations
+
+- Each key press runs a shell, `herdr pane layout` and a socket request, so it is a few tens of milliseconds
+  slower than the built-in move.
+- Every focus event spawns a `bin/record` process.
+- The MRU list is per tab. A pane moved to another tab gets a new id, so its history does not carry over.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+[MIT](LICENSE)

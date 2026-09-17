@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# focus <left|right|up|down>: move focus to the most recently used neighbour in that direction.
+#
+# Candidate rule is the same as herdr 0.9.0 find_in_direction: panes on that side whose perpendicular axis overlaps.
+# Only the sort key differs:  herdr = (edge distance,           overlap desc, center distance, order)
+#                             this  = (edge distance, MRU rank, overlap desc, center distance, order)
+# Edge distance stays first so history is only followed among directly adjacent panes (tmux also picks among adjacent panes only).
+#
+# On any failure, hand off to herdr's built-in directional focus: this plugin must never block navigation.
+set -u
+
+dir=${1:-}
+herdr=${HERDR_BIN_PATH:-herdr}
+pane=${HERDR_PANE_ID:-}
+state_dir=${HERDR_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/herdr-pane-mru}
+
+fallback() {
+    if [ -n "$pane" ]; then
+        exec "$herdr" pane focus --direction "$dir" --pane "$pane"
+    fi
+    exec "$herdr" pane focus --direction "$dir"
+}
+
+case "$dir" in left | right | up | down) ;; *) echo "usage: focus left|right|up|down" >&2; exit 2 ;; esac
+[ -n "$pane" ] || fallback
+command -v jq >/dev/null 2>&1 || fallback
+command -v socat >/dev/null 2>&1 || fallback
+
+layout=$("$herdr" pane layout --pane "$pane" 2>/dev/null) || fallback
+
+tab=${HERDR_TAB_ID:-$(printf '%s' "$layout" | jq -r '.result.layout.tab_id // empty' 2>/dev/null)}
+tab=${tab:-${pane%%:*}}
+mru_file="$state_dir/$(printf '%s' "$tab" | tr -c 'A-Za-z0-9._-' '_').mru"
+mru_json='[]'
+if [ -f "$mru_file" ]; then
+    mru_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' "$mru_file" 2>/dev/null) || mru_json='[]'
+fi
+
+target=$(printf '%s' "$layout" | jq -r --arg dir "$dir" --arg pane "$pane" --argjson mru "$mru_json" '
+    .result.layout as $l
+    | if ($l.zoomed // false) then "ZOOMED" else
+      ($l.panes | to_entries) as $all
+      | ($all | map(select(.value.pane_id == $pane)) | first) as $me
+      | if $me == null then "" else
+        $me.value.rect as $f
+        | [ $all[]
+            | select(.value.pane_id != $pane)
+            | .key as $idx | .value.pane_id as $id | .value.rect as $r
+            | ( if $dir == "left"  then ($r.x + $r.width <= $f.x)
+                elif $dir == "right" then ($r.x >= $f.x + $f.width)
+                elif $dir == "up"    then ($r.y + $r.height <= $f.y)
+                else                      ($r.y >= $f.y + $f.height) end ) as $beside
+            | ( if $dir == "left" or $dir == "right"
+                then [$r.y, $r.height, $f.y, $f.height]
+                else [$r.x, $r.width, $f.x, $f.width] end ) as [$as, $al, $bs, $bl]
+            | ( [([$as + $al, $bs + $bl] | min) - ([$as, $bs] | max), 0] | max ) as $overlap
+            | select($beside and $overlap > 0)
+            | ( if $dir == "left"  then $f.x - ($r.x + $r.width)
+                elif $dir == "right" then $r.x - ($f.x + $f.width)
+                elif $dir == "up"    then $f.y - ($r.y + $r.height)
+                else                      $r.y - ($f.y + $f.height) end ) as $edge
+            | ( ((2 * $as + $al) - (2 * $bs + $bl)) | fabs ) as $center
+            | ( ($mru | index($id)) // 1000000 ) as $rank
+            | { id: $id, key: [$edge, $rank, (0 - $overlap), $center, $idx] } ]
+        | sort_by(.key) | (first.id // "")
+        end
+      end
+' 2>/dev/null) || fallback
+
+case "$target" in
+    ZOOMED) fallback ;;
+    "") exit 0 ;; # no pane in that direction: do nothing, same as herdr
+esac
+
+socket=${HERDR_SOCKET_PATH:-}
+[ -n "$socket" ] && [ -S "$socket" ] || fallback
+# The CLI "pane focus" only takes a direction, so focus-by-id goes through the socket API (pane.focus).
+request=$(jq -cn --arg id "$target" '{id: "herdr-pane-mru", method: "pane.focus", params: {pane_id: $id}}')
+response=$(printf '%s\n' "$request" | timeout 2 socat - "UNIX-CONNECT:$socket" 2>/dev/null) || fallback
+printf '%s' "$response" | jq -e '.result' >/dev/null 2>&1 || fallback
+exit 0

@@ -134,6 +134,12 @@ All commands exited 0 in the plugin log; a move took about 34 ms and a record ab
 - Every focus event spawns a `bin/record` process.
 - The MRU list is per tab. A pane moved to another tab gets a new id, so its history does not carry over.
 
+## Third-party
+
+The candidate selection and ordering rule in `bin/focus` is modelled on herdr's
+`find_in_direction` (`src/layout.rs`). herdr is licensed under Apache-2.0. No herdr
+code or binary is redistributed here.
+
 ## License
 
 [MIT](LICENSE)

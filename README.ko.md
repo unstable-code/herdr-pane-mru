@@ -126,6 +126,11 @@ description = "focus pane right (MRU)"
 - 포커스 이벤트마다 `bin/record` 프로세스가 뜬다.
 - MRU 는 탭 단위다. pane 이 다른 탭으로 옮겨지면 새 id 를 받으므로 이전 이력은 이어지지 않는다.
 
+## 제3자 저작물
+
+`bin/focus` 의 후보 선정·정렬 규칙은 herdr 의 `find_in_direction`(`src/layout.rs`)
+을 참고한 것이다. herdr 는 Apache-2.0 이다. herdr 의 코드나 바이너리를 재배포하지는 않는다.
+
 ## License
 
 [MIT](LICENSE)
